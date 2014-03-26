@@ -353,7 +353,7 @@ class PhpDumper extends Dumper
 
         $return = '';
         if ($simple) {
-            $return = 'return ';
+            $return = "return isset(\$this->services['$id']) ? \$this->services['$id'] : ";
         } else {
             $instantiation .= ' = ';
         }
@@ -405,7 +405,7 @@ class PhpDumper extends Dumper
         foreach ($definition->getMethodCalls() as $call) {
             $arguments = array();
             foreach ($call[1] as $value) {
-                $arguments[] = $this->dumpValue($value);
+                $arguments[] = $this->dumpValue($value, true, $definition);
             }
 
             $calls .= $this->wrapServiceConditionals($call[1], sprintf("        \$%s->%s(%s);\n", $variableName, $call[0], implode(', ', $arguments)));
@@ -654,7 +654,7 @@ EOF;
                     if ($argument instanceof Reference && $id == (string) $argument) {
                         $arguments = array();
                         foreach ($call[1] as $value) {
-                            $arguments[] = $this->dumpValue($value);
+                            $arguments[] = $this->dumpValue($value, null, $definition);
                         }
 
                         $call = $this->wrapServiceConditionals($call[1], sprintf("\$this->get('%s')->%s(%s);", $definitionId, $call[0], implode(', ', $arguments)));
@@ -688,11 +688,11 @@ EOF;
 
     private function addNewInstance($id, Definition $definition, $return, $instantiation)
     {
-        $class = $this->dumpValue($definition->getClass());
+        $class = $this->dumpValue($definition->getClass(), true, $definition);
 
         $arguments = array();
         foreach ($definition->getArguments() as $value) {
-            $arguments[] = $this->dumpValue($value);
+            $arguments[] = $this->dumpValue($value, true, $definition);
         }
 
         if (null !== $definition->getFactoryMethod()) {
@@ -708,7 +708,7 @@ EOF;
             }
 
             if (null !== $definition->getFactoryService()) {
-                return sprintf("        $return{$instantiation}%s->%s(%s);\n", $this->getServiceCall($definition->getFactoryService()), $definition->getFactoryMethod(), implode(', ', $arguments));
+                return sprintf("        $return{$instantiation}%s->%s(%s);\n", $this->getServiceCall($definition->getFactoryService(), null, $definition), $definition->getFactoryMethod(), implode(', ', $arguments));
             }
 
             throw new RuntimeException(sprintf('Factory method requires a factory service or factory class in service definition for %s', $id));
@@ -1170,12 +1170,13 @@ EOF;
      *
      * @param array   $value
      * @param Boolean $interpolate
+     * @param Definition $definition
      *
      * @return string
      *
      * @throws RuntimeException
      */
-    private function dumpValue($value, $interpolate = true)
+    private function dumpValue($value, $interpolate = true, $definition = null)
     {
         if (is_array($value)) {
             $code = array();
@@ -1266,13 +1267,14 @@ EOF;
      * Dumps a parameter
      *
      * @param string $name
+     * @param Definition $definition
      *
      * @return string
      */
-    public function dumpParameter($name)
+    public function dumpParameter($name, $definition)
     {
         if ($this->container->isFrozen() && $this->container->hasParameter($name)) {
-            return $this->dumpValue($this->container->getParameter($name), false);
+            return $this->dumpValue($this->container->getParameter($name), false, $definition);
         }
 
         return sprintf("\$this->getParameter('%s')", strtolower($name));
@@ -1286,7 +1288,7 @@ EOF;
      *
      * @return string
      */
-    private function getServiceCall($id, Reference $reference = null)
+    private function getServiceCall($id, Reference $reference = null, $definition = NULL)
     {
         if ('service_container' === $id) {
             return '$this';
@@ -1298,8 +1300,11 @@ EOF;
             if ($this->container->hasAlias($id)) {
                 $id = (string) $this->container->getAlias($id);
             }
+            if ($definition && $definition->isSynthetic() || $id === 'request') {
+              return sprintf('$this->get(\'%s\')', $id);
+            }
+            return '$this->get' . $this->camelize($id) . 'Service()';
 
-            return sprintf('$this->get(\'%s\')', $id);
         }
     }
 
